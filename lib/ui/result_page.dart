@@ -15,7 +15,7 @@ class ResultPage extends StatefulWidget {
 class _ResultPageState extends State<ResultPage> {
   static const Classifier _classifier = PlaceholderClassifier();
 
-  List<ClassScore>? _scores;
+  List<double>? _scores;
   String? _fileName;
   double _fileSeconds = 0;
   double _inferMs = 0;
@@ -39,7 +39,7 @@ class _ResultPageState extends State<ResultPage> {
     });
 
     final watch = Stopwatch()..start();
-    final scores = await _classifier.classify(file.path);
+    final scores = await _classifier.classifyFile(file.path);
     watch.stop();
     if (!mounted) return;
     setState(() {
@@ -109,21 +109,21 @@ class _ResultPageState extends State<ResultPage> {
             ),
             const SizedBox(height: 16),
             if (scores != null) ...[
-              Text('三类分数', style: Theme.of(context).textTheme.titleMedium),
+              Text('各类分数', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 8),
-              for (final s in scores) ...[
+              for (var i = 0; i < scores.length; i++) ...[
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(s.label),
-                    Text('${(s.score * 100).toStringAsFixed(1)}%'),
+                    Text(_classifier.labels[i]),
+                    Text('${(scores[i] * 100).toStringAsFixed(1)}%'),
                   ],
                 ),
                 const SizedBox(height: 4),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(4),
                   child: LinearProgressIndicator(
-                    value: s.score,
+                    value: scores[i],
                     minHeight: 8,
                   ),
                 ),

@@ -1,0 +1,45 @@
+{
+  "_comment": "手机端唯一的参数源。所有数字都在这里，代码里不许再出现 48000、1.0、0.25 这类常量。改这里，全局生效。",
+  "version": 1,
+  "audio": {
+    "sampleRate": 48000,
+    "channels": 1,
+    "bitDepth": 16,
+    "disableAgc": true,
+    "disableNoiseSuppress": true,
+    "disableEchoCancel": true
+  },
+  "window": {
+    "seconds": 1.0,
+    "hopSeconds": 0.25
+  },
+  "normalize": {
+    "mode": "per_window_zscore"
+  },
+  "classes": ["swallow", "cough", "interfere"],
+  "detection": {
+    "energyFrameMs": 25,
+    "energyHopMs": 10,
+    "thresholdOnDb": -35.0,
+    "thresholdOffDb": -45.0,
+    "minEventMs": 200,
+    "maxEventMs": 1500,
+    "cooldownMs": 500,
+    "voteWindows": 3,
+    "voteMinHits": 2
+  },
+  "sync": {
+    "toleranceMs": 10,
+    "beepAnchor": true,
+    "maxDriftPpm": 200
+  },
+  "latency": {
+    "frameReadyBudgetMs": 20,
+    "responseBudgetMs": 300
+  },
+  "package": {
+    "labelsFile": "labels.txt",
+    "preprocessFile": "preprocess.json",
+    "modelFileName": "model.tflite"
+  }
+}

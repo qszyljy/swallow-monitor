@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import 'wav_writer.dart';
+import 'spec.dart';
 
 /// 采集类别。文件名前缀用它，攒出来的数据集直接按类别分好。
 enum EventLabel {
@@ -22,12 +23,13 @@ enum EventLabel {
 }
 
 class RecorderService extends ChangeNotifier {
-  /// 任务书要求：录音端直接 48 kHz，离线再降采样到 22.05 kHz。
-  static const int sampleRate = 48000;
-  static const int channels = 1;
+  /// 采样率与通道数来自唯一参数源（assets/spec.default.json），
+  /// 代码里不再写字面量——要改只改那个 JSON。
+  static int get sampleRate => PipelineSpec.current.audio.sampleRate;
+  static int get channels => PipelineSpec.current.audio.channels;
 
   /// 波形显示用：每 10 ms 一个峰值点，窗口约 10 s。
-  static const int _binSamples = 480;
+  int get _binSamples => (PipelineSpec.current.audio.sampleRate / 100).round();
   static const int _maxPoints = 1000;
 
   final AudioRecorder _recorder = AudioRecorder();
@@ -154,7 +156,7 @@ class RecorderService extends ChangeNotifier {
       await writer.open();
 
       final stream = await _recorder.startStream(
-        const RecordConfig(
+        RecordConfig(
           encoder: AudioEncoder.pcm16bits,
           sampleRate: sampleRate,
           numChannels: channels,

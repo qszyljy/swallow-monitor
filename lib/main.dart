@@ -1,11 +1,22 @@
 import 'package:flutter/material.dart';
 
 import 'core/recorder_service.dart';
+import 'core/spec.dart';
 import 'ui/capture_page.dart';
 import 'ui/recordings_page.dart';
 import 'ui/result_page.dart';
 
-void main() => runApp(const SwallowApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    // 唯一参数源：采样率、窗长、步长、阈值、时延口径都从这里来
+    await PipelineSpec.loadBundled();
+  } catch (error) {
+    // 读不到就用兜底值启动，界面上会有提示，不至于白屏
+    debugPrint('spec 读取失败，使用兜底配置：$error');
+  }
+  runApp(const SwallowApp());
+}
 
 class SwallowApp extends StatelessWidget {
   const SwallowApp({super.key});
