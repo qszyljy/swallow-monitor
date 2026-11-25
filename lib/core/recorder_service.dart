@@ -129,7 +129,8 @@ class RecorderService extends ChangeNotifier {
     return path;
   }
 
-  Future<void> start({EventLabel? event}) async {
+  /// [saveAudio] 为 false 时不落盘——识别/盲测模式用，避免现场演示污染数据集。
+  Future<void> start({EventLabel? event, bool saveAudio = true}) async {
     if (recording) return;
     error = null;
     label = event ?? label;
@@ -147,7 +148,7 @@ class RecorderService extends ChangeNotifier {
     }
 
     try {
-      final path = await _nextPath(label);
+      final String? path = saveAudio ? await _nextPath(label) : null;
       await _source.start(wavPath: path);
       lastFile = path;
       _frameSub = _source.frames.listen(_onFrame);
