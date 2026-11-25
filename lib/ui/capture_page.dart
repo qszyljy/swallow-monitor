@@ -47,7 +47,7 @@ class CapturePage extends StatelessWidget {
                         color: recording ? scheme.error : scheme.outline,
                       ),
                       const SizedBox(width: 6),
-                      Text(recording ? '录音中' : '待机'),
+                      Text('${recorder.subject} · ${recording ? '录音中' : '待机'}'),
                     ],
                   ),
                 ),
@@ -60,6 +60,8 @@ class CapturePage extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  _subjectRow(context, enabled: !recording),
+                  const SizedBox(height: 8),
                   _labelPicker(context, enabled: !recording),
                   const SizedBox(height: 12),
                   Expanded(
@@ -95,6 +97,77 @@ class CapturePage extends StatelessWidget {
         );
       },
     );
+  }
+
+  Widget _subjectRow(BuildContext context, {required bool enabled}) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Icon(Icons.person_outline, size: 18, color: scheme.outline),
+        const SizedBox(width: 6),
+        Text('被试', style: Theme.of(context).textTheme.bodyMedium),
+        const SizedBox(width: 8),
+        ActionChip(
+          label: Text(recorder.subject),
+          onPressed: enabled ? () => _pickSubject(context) : null,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickSubject(BuildContext context) async {
+    final controller = TextEditingController(text: recorder.subject);
+    String chip(int i) => 'p${i.toString().padLeft(2, '0')}';
+
+    final picked = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('被试编号'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                for (var i = 1; i <= 8; i++)
+                  ActionChip(
+                    label: Text(chip(i)),
+                    onPressed: () => Navigator.pop(dialogContext, chip(i)),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              decoration: const InputDecoration(
+                labelText: '或手动输入',
+                helperText: '字母或数字，最多 8 位',
+              ),
+              maxLength: 8,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+
+    if (picked == null) return;
+    if (!recorder.setSubject(picked) && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('编号只能是字母或数字')),
+      );
+    }
   }
 
   Widget _labelPicker(BuildContext context, {required bool enabled}) {

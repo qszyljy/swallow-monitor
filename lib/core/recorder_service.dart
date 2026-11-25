@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -46,6 +47,52 @@ class RecorderService extends ChangeNotifier {
   EventLabel label = EventLabel.swallow;
   double elapsedSeconds = 0;
 
+  /// 被试编号，写进文件名（p03_swallow_20261125_103000.wav）。
+  /// LOSO 按被试划分，没有它就做不了交叉验证。
+  static const String defaultSubject = 'p00';
+  String subject = defaultSubject;
+
+  bool setSubject(String value) {
+    final cleaned = value.trim().replaceAll(RegExp('[^A-Za-z0-9]'), '');
+    if (cleaned.isEmpty) return false;
+    subject = cleaned.length > 8 ? cleaned.substring(0, 8) : cleaned;
+    notifyListeners();
+    unawaited(saveSettings());
+    return true;
+  }
+
+  Future<File> _settingsFile() async {
+    final base = await getApplicationDocumentsDirectory();
+    return File('${base.path}/settings.json');
+  }
+
+  /// 启动时恢复上次用的编号——8 个人轮流录，每次重输必然录错人。
+  Future<void> loadSettings() async {
+    try {
+      final file = await _settingsFile();
+      if (!await file.exists()) return;
+      final data = jsonDecode(await file.readAsString());
+      if (data is Map && data['subject'] is String) {
+        final saved = data['subject'] as String;
+        if (saved.isNotEmpty) {
+          subject = saved;
+          notifyListeners();
+        }
+      }
+    } catch (_) {
+      // 配置读坏了不该挡住录音
+    }
+  }
+
+  Future<void> saveSettings() async {
+    try {
+      final file = await _settingsFile();
+      await file.writeAsString(jsonEncode({'subject': subject}));
+    } catch (_) {
+      // 忽略写配置失败
+    }
+  }
+
   /// 已写入文件的音频时长（来自实际字节数，不是秒表）。
   double get recordedSeconds => _writer?.seconds ?? 0;
 
@@ -69,7 +116,15 @@ class RecorderService extends ChangeNotifier {
     final t = DateTime.now();
     final stamp = '${t.year}${two(t.month)}${two(t.day)}_'
         '${two(t.hour)}${two(t.minute)}${two(t.second)}';
-    return '${dir.path}/records/${label.slug}_$stamp.wav';
+    final base = '${dir.path}/records/${subject}_${label.slug}_$stamp';
+    // 同一秒内停止再开始会撞名，加后缀；训练端的文件名正则允许这个后缀
+    var path = '$base.wav';
+    var n = 2;
+    while (await File(path).exists()) {
+      path = '${base}_$n.wav';
+      n++;
+    }
+    return path;
   }
 
   Future<void> start({EventLabel? event}) async {

@@ -36,6 +36,13 @@ class _HomeShellState extends State<HomeShell> {
   int _index = 0;
 
   @override
+  void initState() {
+    super.initState();
+    // 恢复上次的被试编号
+    _recorder.loadSettings();
+  }
+
+  @override
   void dispose() {
     _recorder.dispose();
     super.dispose();
