@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'classifier.dart';
-import 'spec.dart';
+import '../spec.dart';
 
 /// 导出包 = 手机端唯一接口。
 ///
