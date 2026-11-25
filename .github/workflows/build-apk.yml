@@ -33,6 +33,7 @@ jobs:
           cp pubspec.yaml /tmp/app/pubspec.yaml
           cp -r lib/. /tmp/app/lib/
           rm -f /tmp/app/analysis_options.yaml
+          rm -rf /tmp/app/test   # 模板自带的 widget_test 引用 MyApp，会编译失败
           python3 tools/prepare_android.py /tmp/app
 
       - name: 静态检查
