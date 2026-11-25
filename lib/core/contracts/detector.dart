@@ -9,6 +9,7 @@ class DetectionResult {
     required this.label,
     required this.scores,
     required this.score,
+    required this.startMicros,
     required this.timestampMicros,
     required this.latencyMs,
     required this.isEvent,
@@ -20,6 +21,9 @@ class DetectionResult {
 
   /// 判定类的分数
   final double score;
+
+  /// 事件开始时刻（设备时间戳）
+  final int startMicros;
 
   /// 事件结束时刻（设备时间戳），不是出结果的时刻
   final int timestampMicros;

@@ -125,6 +125,7 @@ class MicDetector implements Detector {
             label: classifier.ready ? majority : 'pending',
             scores: scores,
             score: scores.isEmpty ? 0 : scores[_argmax(scores)],
+            startMicros: candidate.startMicros,
             timestampMicros: candidate.endMicros,
             latencyMs: watch.elapsedMilliseconds,
             isEvent: true,

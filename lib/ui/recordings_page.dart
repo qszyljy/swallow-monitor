@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../core/recorder_service.dart';
+import 'event_annotation_page.dart';
 
 class RecordingsPage extends StatefulWidget {
   const RecordingsPage({super.key});
@@ -98,6 +99,13 @@ class _RecordingsPageState extends State<RecordingsPage> {
               final seconds =
                   file.lengthSync() / (RecorderService.sampleRate * 2);
               return ListTile(
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => EventAnnotationPage(wavPath: file.path),
+                    ),
+                  );
+                },
                 leading: const Icon(Icons.audio_file),
                 title: Text(name, style: Theme.of(context).textTheme.bodyMedium),
                 subtitle: Text(

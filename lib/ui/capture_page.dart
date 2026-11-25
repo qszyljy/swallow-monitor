@@ -2,12 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/app_event.dart';
 import '../core/contracts/classifier.dart';
 import '../core/contracts/detector.dart';
 import '../core/contracts/sample_source.dart';
 import '../core/impls/mic_detector.dart';
 import '../core/recorder_service.dart';
 import '../core/spec.dart';
+import 'event_annotation_page.dart';
 import 'waveform_view.dart';
 
 class CapturePage extends StatefulWidget {
@@ -24,7 +26,7 @@ class _CapturePageState extends State<CapturePage> {
   StreamSubscription<SampleFrame>? _frameSub;
   StreamSubscription<DetectionResult>? _resultSub;
   DetectionResult? _last;
-  int _events = 0;
+  final List<AppEvent> _eventLog = <AppEvent>[];
 
   RecorderService get recorder => widget.recorder;
 
@@ -40,7 +42,15 @@ class _CapturePageState extends State<CapturePage> {
       if (!mounted) return;
       setState(() {
         _last = result;
-        _events = _detector.eventCount;
+        _eventLog.add(
+          AppEvent(
+            startMicros: result.startMicros,
+            endMicros: result.timestampMicros,
+            predictedLabel: result.label,
+            scores: result.scores,
+            latencyMs: result.latencyMs,
+          ),
+        );
       });
     });
   }
@@ -57,15 +67,20 @@ class _CapturePageState extends State<CapturePage> {
     final messenger = ScaffoldMessenger.of(context);
     if (recorder.recording) {
       final seconds = recorder.recordedSeconds;
+      final path = recorder.lastFile;
       await recorder.stop();
-      final name = recorder.lastFile?.split('/').last ?? '录音';
+      // 事件跟着录音一起落盘，后面才能在「记录」页回看和标注
+      if (path != null && _eventLog.isNotEmpty) {
+        unawaited(EventStore.save(path, _eventLog));
+      }
+      final name = path?.split('/').last ?? '录音';
       messenger.showSnackBar(
         SnackBar(content: Text('已保存 $name（${seconds.toStringAsFixed(1)} s）')),
       );
     } else {
       _detector.reset();
+      _eventLog.clear();
       setState(() {
-        _events = 0;
         _last = null;
       });
       await recorder.start();
@@ -121,7 +136,10 @@ class _CapturePageState extends State<CapturePage> {
                       borderRadius: BorderRadius.circular(16),
                       child: ColoredBox(
                         color: scheme.surfaceContainerHighest,
-                        child: WaveformView(peaks: recorder.peaks),
+                        child: WaveformView(
+                          peaks: recorder.peaks,
+                          markers: _markers(),
+                        ),
                       ),
                     ),
                   ),
@@ -259,6 +277,20 @@ class _CapturePageState extends State<CapturePage> {
     );
   }
 
+  /// 只标最近 10 秒内的事件——波形窗口就这么长，更早的要看回放标注页。
+  List<EventMarker> _markers() {
+    final now = recorder.elapsedSeconds;
+    final markers = <EventMarker>[];
+    for (final event in _eventLog) {
+      final endAgo = now - event.endSec;
+      if (endAgo < 0 || endAgo > 10) continue;
+      markers.add(
+        EventMarker(endAgoSeconds: endAgo, durationSeconds: event.durationSec),
+      );
+    }
+    return markers;
+  }
+
   Widget _detectionCard(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final last = _last;
@@ -277,7 +309,7 @@ class _CapturePageState extends State<CapturePage> {
                 const SizedBox(width: 6),
                 Text('实时检测', style: Theme.of(context).textTheme.labelLarge),
                 const Spacer(),
-                Text('事件 $_events',
+                Text('事件 ${_eventLog.length}',
                     style: Theme.of(context).textTheme.titleSmall),
               ],
             ),
@@ -296,6 +328,26 @@ class _CapturePageState extends State<CapturePage> {
                     .textTheme
                     .bodySmall
                     ?.copyWith(color: scheme.outline),
+              ),
+            if (recorder.lastFile != null && !recorder.recording)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 32),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            EventAnnotationPage(wavPath: recorder.lastFile!),
+                      ),
+                    );
+                  },
+                  child: const Text('查看 / 标注事件'),
+                ),
               ),
           ],
         ),

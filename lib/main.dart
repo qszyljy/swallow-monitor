@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'core/recorder_service.dart';
 import 'core/spec.dart';
 import 'ui/capture_page.dart';
+import 'ui/model_page.dart';
 import 'ui/recordings_page.dart';
 import 'ui/result_page.dart';
 
@@ -68,6 +69,7 @@ class _HomeShellState extends State<HomeShell> {
           CapturePage(recorder: _recorder),
           ResultPage(recorder: _recorder),
           const RecordingsPage(),
+          const ModelPage(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -77,6 +79,7 @@ class _HomeShellState extends State<HomeShell> {
           NavigationDestination(icon: Icon(Icons.graphic_eq), label: '采集'),
           NavigationDestination(icon: Icon(Icons.insights), label: '分类'),
           NavigationDestination(icon: Icon(Icons.folder_open), label: '记录'),
+          NavigationDestination(icon: Icon(Icons.deployed_code), label: '模型'),
         ],
       ),
     );
