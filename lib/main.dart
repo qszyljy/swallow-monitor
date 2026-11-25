@@ -79,7 +79,7 @@ class _HomeShellState extends State<HomeShell> {
           NavigationDestination(icon: Icon(Icons.graphic_eq), label: '采集'),
           NavigationDestination(icon: Icon(Icons.insights), label: '分类'),
           NavigationDestination(icon: Icon(Icons.folder_open), label: '记录'),
-          NavigationDestination(icon: Icon(Icons.deployed_code), label: '模型'),
+          NavigationDestination(icon: Icon(Icons.model_training), label: '模型'),
         ],
       ),
     );
