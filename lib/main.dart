@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'core/classifier_provider.dart';
 import 'core/recorder_service.dart';
 import 'core/spec.dart';
 import 'ui/capture_page.dart';
@@ -45,6 +46,7 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   final RecorderService _recorder = RecorderService();
+  final ClassifierProvider _classifierProvider = ClassifierProvider();
   int _index = 0;
 
   @override
@@ -52,10 +54,12 @@ class _HomeShellState extends State<HomeShell> {
     super.initState();
     // 恢复上次的被试编号
     _recorder.loadSettings();
+    _classifierProvider.load();
   }
 
   @override
   void dispose() {
+    _classifierProvider.dispose();
     _recorder.dispose();
     super.dispose();
   }
@@ -66,10 +70,16 @@ class _HomeShellState extends State<HomeShell> {
       body: IndexedStack(
         index: _index,
         children: [
-          CapturePage(recorder: _recorder),
-          ResultPage(recorder: _recorder),
+          CapturePage(
+            recorder: _recorder,
+            classifierProvider: _classifierProvider,
+          ),
+          ResultPage(
+            recorder: _recorder,
+            classifierProvider: _classifierProvider,
+          ),
           const RecordingsPage(),
-          const ModelPage(),
+          ModelPage(classifierProvider: _classifierProvider),
         ],
       ),
       bottomNavigationBar: NavigationBar(

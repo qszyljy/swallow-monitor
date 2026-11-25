@@ -1,12 +1,15 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import '../core/classifier_provider.dart';
 import '../core/contracts/model_package.dart';
 import '../core/model_manager.dart';
 
 /// 模型导入页：选 zip → 解压 → 四项一致性检查 → 登记为当前模型。
 class ModelPage extends StatefulWidget {
-  const ModelPage({super.key});
+  const ModelPage({super.key, required this.classifierProvider});
+
+  final ClassifierProvider classifierProvider;
 
   @override
   State<ModelPage> createState() => _ModelPageState();
@@ -54,6 +57,8 @@ class _ModelPageState extends State<ModelPage> {
             : '${result.message}\n${result.issues.join('\n')}';
       });
       await _refresh();
+      // 让全局分类器换成新模型，不用重启
+      await widget.classifierProvider.load();
     } catch (e) {
       if (mounted) setState(() => _status = '导入失败：$e');
     } finally {

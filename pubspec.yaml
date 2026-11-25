@@ -14,6 +14,7 @@ dependencies:
   share_plus: ^13.3.1     # 把 wav 导出给电脑/微信
   file_picker: ^13.4.1    # 选模型包 zip
   archive: ^4.7.1         # 解压模型包
+  tflite_flutter: ^0.12.1 # 端侧推理
 
 dev_dependencies:
   flutter_test:

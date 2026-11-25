@@ -175,9 +175,9 @@ class MicDetector implements Detector {
     _busy = false;
   }
 
+  /// 只关自己的流；分类器归 ClassifierProvider 管，这里不释放。
   @override
   Future<void> dispose() async {
     await _results.close();
-    await classifier.dispose();
   }
 }

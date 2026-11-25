@@ -5,7 +5,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../core/app_event.dart';
 import '../core/benchmark_log.dart';
-import '../core/contracts/classifier.dart';
+import '../core/classifier_provider.dart';
 import '../core/contracts/detector.dart';
 import '../core/contracts/sample_source.dart';
 import '../core/impls/mic_detector.dart';
@@ -17,16 +17,21 @@ import 'waveform_view.dart';
 enum CaptureMode { collect, recognize }
 
 class CapturePage extends StatefulWidget {
-  const CapturePage({super.key, required this.recorder});
+  const CapturePage({
+    super.key,
+    required this.recorder,
+    required this.classifierProvider,
+  });
 
   final RecorderService recorder;
+  final ClassifierProvider classifierProvider;
 
   @override
   State<CapturePage> createState() => _CapturePageState();
 }
 
 class _CapturePageState extends State<CapturePage> {
-  late final MicDetector _detector;
+  late MicDetector _detector;
   StreamSubscription<SampleFrame>? _frameSub;
   StreamSubscription<DetectionResult>? _resultSub;
 
@@ -44,11 +49,18 @@ class _CapturePageState extends State<CapturePage> {
   @override
   void initState() {
     super.initState();
-    _detector = MicDetector(
-      specProvider: () => PipelineSpec.current,
-      classifier: const PlaceholderClassifier(),
-    );
-    _frameSub = recorder.frames.listen(_detector.handleFrame);
+    _detector = _createDetector();
+    _frameSub = recorder.frames.listen((frame) => _detector.handleFrame(frame));
+    _bindResults();
+    widget.classifierProvider.addListener(_onClassifierChanged);
+  }
+
+  MicDetector _createDetector() => MicDetector(
+        specProvider: () => PipelineSpec.current,
+        classifier: widget.classifierProvider.classifier,
+      );
+
+  void _bindResults() {
     _resultSub = _detector.results.listen((result) {
       if (!mounted) return;
       setState(() {
@@ -66,8 +78,19 @@ class _CapturePageState extends State<CapturePage> {
     });
   }
 
+  /// 模型换了就重建检测器，编号和计数清零，避免新旧模型的分数混在一起。
+  void _onClassifierChanged() {
+    final previous = _detector;
+    _resultSub?.cancel();
+    _detector = _createDetector();
+    _bindResults();
+    unawaited(previous.dispose());
+    if (mounted) setState(_resetSession);
+  }
+
   @override
   void dispose() {
+    widget.classifierProvider.removeListener(_onClassifierChanged);
     _frameSub?.cancel();
     _resultSub?.cancel();
     unawaited(_detector.dispose());
