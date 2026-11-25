@@ -65,6 +65,26 @@ def patch_min_sdk(root: pathlib.Path) -> str:
     return "未找到 minSdk 配置，跳过（如构建报错请检查这里）"
 
 
+def patch_gradle_properties(root: pathlib.Path) -> str:
+    """tflite_flutter 的 Java 目标 11、Kotlin 目标 17，Gradle 会直接判失败。
+
+    两者字节码在 Android 上都能跑，把校验降成警告即可；真要统一得改插件，
+    不值得。这句写进 gradle.properties 全局生效。
+    """
+    path = root / "android/gradle.properties"
+    if not path.exists():
+        return "找不到 gradle.properties"
+    text = path.read_text(encoding="utf-8")
+    key = "kotlin.jvm.target.validation.mode"
+    if key in text:
+        return "gradle.properties 已有校验设置"
+    if not text.endswith("\n"):
+        text += "\n"
+    text += f"\n# Java/Kotlin 目标版本不一致时只警告，不中断构建\n{key}=warning\n"
+    path.write_text(text, encoding="utf-8")
+    return "已放宽 Java/Kotlin 目标校验"
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(__doc__)
@@ -75,6 +95,7 @@ def main() -> int:
         return 1
     print(patch_manifest(root))
     print(patch_min_sdk(root))
+    print(patch_gradle_properties(root))
     return 0
 
 
