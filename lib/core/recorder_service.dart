@@ -5,9 +5,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart';
 
-import 'wav_writer.dart';
+import 'contracts/sample_source.dart';
+import 'impls/mic_source.dart';
 import 'spec.dart';
 
 /// 采集类别。文件名前缀用它，攒出来的数据集直接按类别分好。
@@ -22,21 +22,26 @@ enum EventLabel {
   final String note;
 }
 
+/// 界面用的采集控制器：把 [MicSource] 包成可监听的状态。
+///
+/// 音频解码、波形分箱、文件落盘都在 MicSource 里；这里只管
+/// 「开始/停止、文件名、峰值、时长、设置」这些界面关心的事。
 class RecorderService extends ChangeNotifier {
-  /// 采样率与通道数来自唯一参数源（assets/spec.default.json），
-  /// 代码里不再写字面量——要改只改那个 JSON。
+  RecorderService() {
+    _source = MicSource(specProvider: () => PipelineSpec.current);
+  }
+
+  late final MicSource _source;
+  StreamSubscription<SampleFrame>? _frameSub;
+  Timer? _ticker;
+  final Stopwatch _clock = Stopwatch();
+
+  /// 波形显示用：每 10 ms 一个峰值点，窗口约 10 s。
   static int get sampleRate => PipelineSpec.current.audio.sampleRate;
   static int get channels => PipelineSpec.current.audio.channels;
 
-  /// 波形显示用：每 10 ms 一个峰值点，窗口约 10 s。
   int get _binSamples => (PipelineSpec.current.audio.sampleRate / 100).round();
   static const int _maxPoints = 1000;
-
-  final AudioRecorder _recorder = AudioRecorder();
-  StreamSubscription<Uint8List>? _sub;
-  WavWriter? _writer;
-  Timer? _ticker;
-  final Stopwatch _clock = Stopwatch();
 
   final List<double> peaks = <double>[];
   int _binFill = 0;
@@ -49,10 +54,24 @@ class RecorderService extends ChangeNotifier {
   EventLabel label = EventLabel.swallow;
   double elapsedSeconds = 0;
 
-  /// 被试编号，写进文件名（p03_swallow_20261125_103000.wav）。
-  /// LOSO 按被试划分，没有它就做不了交叉验证。
   static const String defaultSubject = 'p00';
   String subject = defaultSubject;
+
+  /// 检测器订阅这个流；录音停止时流自然没有数据。
+  Stream<SampleFrame> get frames => _source.frames;
+
+  double get recordedSeconds => _source.recordedSeconds;
+
+  double get peakDb {
+    if (_sessionPeak <= 0.0001) return -80;
+    return 20 * math.log(_sessionPeak) / math.ln10;
+  }
+
+  void setLabel(EventLabel value) {
+    if (label == value) return;
+    label = value;
+    notifyListeners();
+  }
 
   bool setSubject(String value) {
     final cleaned = value.trim().replaceAll(RegExp('[^A-Za-z0-9]'), '');
@@ -68,7 +87,6 @@ class RecorderService extends ChangeNotifier {
     return File('${base.path}/settings.json');
   }
 
-  /// 启动时恢复上次用的编号——8 个人轮流录，每次重输必然录错人。
   Future<void> loadSettings() async {
     try {
       final file = await _settingsFile();
@@ -95,23 +113,6 @@ class RecorderService extends ChangeNotifier {
     }
   }
 
-  /// 已写入文件的音频时长（来自实际字节数，不是秒表）。
-  double get recordedSeconds => _writer?.seconds ?? 0;
-
-  /// 会话最大峰值，转 dBFS 显示，用来判断有没有削顶。
-  double get peakDb {
-    if (_sessionPeak <= 0.0001) return -80;
-    return 20 * math.log(_sessionPeak) / math.ln10;
-  }
-
-  Future<bool> ensurePermission() => _recorder.hasPermission();
-
-  void setLabel(EventLabel value) {
-    if (label == value) return;
-    label = value;
-    notifyListeners();
-  }
-
   Future<String> _nextPath(EventLabel label) async {
     final dir = await getApplicationDocumentsDirectory();
     String two(int v) => v.toString().padLeft(2, '0');
@@ -119,7 +120,6 @@ class RecorderService extends ChangeNotifier {
     final stamp = '${t.year}${two(t.month)}${two(t.day)}_'
         '${two(t.hour)}${two(t.minute)}${two(t.second)}';
     final base = '${dir.path}/records/${subject}_${label.slug}_$stamp';
-    // 同一秒内停止再开始会撞名，加后缀；训练端的文件名正则允许这个后缀
     var path = '$base.wav';
     var n = 2;
     while (await File(path).exists()) {
@@ -139,7 +139,7 @@ class RecorderService extends ChangeNotifier {
     _sessionPeak = 0;
     elapsedSeconds = 0;
 
-    final granted = await _recorder.hasPermission();
+    final granted = await _source.ensurePermission();
     if (!granted) {
       error = '没有录音权限，去系统设置里允许麦克风';
       notifyListeners();
@@ -148,35 +148,9 @@ class RecorderService extends ChangeNotifier {
 
     try {
       final path = await _nextPath(label);
-      final writer = WavWriter(
-        file: File(path),
-        sampleRate: sampleRate,
-        channels: channels,
-      );
-      await writer.open();
-
-      final stream = await _recorder.startStream(
-        RecordConfig(
-          encoder: AudioEncoder.pcm16bits,
-          sampleRate: sampleRate,
-          numChannels: channels,
-          // 任务书要求：关掉系统自动增益、降噪、回声消除，
-          // 否则咳嗽的冲击被压平、吞咽低频被削掉。
-          autoGain: false,
-          echoCancel: false,
-          noiseSuppress: false,
-        ),
-      );
-
-      _writer = writer;
+      await _source.start(wavPath: path);
       lastFile = path;
-      _sub = stream.listen(
-        _onChunk,
-        onError: (Object e) {
-          error = '录音中断：$e';
-          unawaited(stop());
-        },
-      );
+      _frameSub = _source.frames.listen(_onFrame);
       recording = true;
       _clock
         ..reset()
@@ -189,20 +163,17 @@ class RecorderService extends ChangeNotifier {
     } catch (e) {
       error = '启动录音失败：$e';
       recording = false;
-      await _writer?.close();
-      _writer = null;
+      await _frameSub?.cancel();
+      _frameSub = null;
       notifyListeners();
     }
   }
 
-  void _onChunk(Uint8List chunk) {
-    _writer?.add(chunk);
-
-    final data = ByteData.sublistView(chunk);
-    final samples = chunk.lengthInBytes ~/ 2;
+  void _onFrame(SampleFrame frame) {
+    final data = ByteData.sublistView(frame.samples);
+    final samples = frame.samples.lengthInBytes ~/ 2;
     for (var i = 0; i < samples; i++) {
-      final v = data.getInt16(i * 2, Endian.little) / 32768.0;
-      final a = v.abs();
+      final a = (data.getInt16(i * 2, Endian.little) / 32768.0).abs();
       if (a > _binPeak) _binPeak = a;
       _binFill++;
       if (_binFill >= _binSamples) {
@@ -221,15 +192,9 @@ class RecorderService extends ChangeNotifier {
     _ticker?.cancel();
     _ticker = null;
     _clock.stop();
-    await _sub?.cancel();
-    _sub = null;
-    try {
-      await _recorder.stop();
-    } catch (_) {
-      // 忽略停止失败，文件已落盘的部分仍然有效
-    }
-    await _writer?.close();
-    _writer = null;
+    await _frameSub?.cancel();
+    _frameSub = null;
+    await _source.stop();
     notifyListeners();
   }
 
@@ -253,8 +218,8 @@ class RecorderService extends ChangeNotifier {
   @override
   void dispose() {
     _ticker?.cancel();
-    _sub?.cancel();
-    _recorder.dispose();
+    _frameSub?.cancel();
+    unawaited(_source.dispose());
     super.dispose();
   }
 }

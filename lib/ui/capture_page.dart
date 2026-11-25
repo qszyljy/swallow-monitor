@@ -1,12 +1,57 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../core/contracts/classifier.dart';
+import '../core/contracts/detector.dart';
+import '../core/contracts/sample_source.dart';
+import '../core/impls/mic_detector.dart';
 import '../core/recorder_service.dart';
+import '../core/spec.dart';
 import 'waveform_view.dart';
 
-class CapturePage extends StatelessWidget {
+class CapturePage extends StatefulWidget {
   const CapturePage({super.key, required this.recorder});
 
   final RecorderService recorder;
+
+  @override
+  State<CapturePage> createState() => _CapturePageState();
+}
+
+class _CapturePageState extends State<CapturePage> {
+  late final MicDetector _detector;
+  StreamSubscription<SampleFrame>? _frameSub;
+  StreamSubscription<DetectionResult>? _resultSub;
+  DetectionResult? _last;
+  int _events = 0;
+
+  RecorderService get recorder => widget.recorder;
+
+  @override
+  void initState() {
+    super.initState();
+    _detector = MicDetector(
+      specProvider: () => PipelineSpec.current,
+      classifier: const PlaceholderClassifier(),
+    );
+    _frameSub = recorder.frames.listen(_detector.handleFrame);
+    _resultSub = _detector.results.listen((result) {
+      if (!mounted) return;
+      setState(() {
+        _last = result;
+        _events = _detector.eventCount;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _frameSub?.cancel();
+    _resultSub?.cancel();
+    unawaited(_detector.dispose());
+    super.dispose();
+  }
 
   Future<void> _toggle(BuildContext context) async {
     final messenger = ScaffoldMessenger.of(context);
@@ -18,6 +63,11 @@ class CapturePage extends StatelessWidget {
         SnackBar(content: Text('已保存 $name（${seconds.toStringAsFixed(1)} s）')),
       );
     } else {
+      _detector.reset();
+      setState(() {
+        _events = 0;
+        _last = null;
+      });
       await recorder.start();
       if (recorder.error != null) {
         messenger.showSnackBar(SnackBar(content: Text(recorder.error!)));
@@ -42,7 +92,9 @@ class CapturePage extends StatelessWidget {
                   child: Row(
                     children: [
                       Icon(
-                        recording ? Icons.fiber_manual_record : Icons.circle_outlined,
+                        recording
+                            ? Icons.fiber_manual_record
+                            : Icons.circle_outlined,
                         size: 12,
                         color: recording ? scheme.error : scheme.outline,
                       ),
@@ -62,7 +114,7 @@ class CapturePage extends StatelessWidget {
                 children: [
                   _subjectRow(context, enabled: !recording),
                   const SizedBox(height: 8),
-                  _labelPicker(context, enabled: !recording),
+                  _labelPicker(enabled: !recording),
                   const SizedBox(height: 12),
                   Expanded(
                     child: ClipRRect(
@@ -75,7 +127,9 @@ class CapturePage extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   _metrics(context),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
+                  _detectionCard(context),
+                  const SizedBox(height: 12),
                   FilledButton.icon(
                     onPressed: () => _toggle(context),
                     icon: Icon(recording ? Icons.stop : Icons.mic),
@@ -84,7 +138,7 @@ class CapturePage extends StatelessWidget {
                       minimumSize: const Size.fromHeight(52),
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Text(
                     '48 kHz · 单声道 · 16 bit · 已关闭 AGC / 降噪 / 回声消除\n'
                     '每个动作前后留 1 s 静息；每类每被试 ≥ 10 条',
@@ -170,7 +224,7 @@ class CapturePage extends StatelessWidget {
     }
   }
 
-  Widget _labelPicker(BuildContext context, {required bool enabled}) {
+  Widget _labelPicker({required bool enabled}) {
     return Wrap(
       spacing: 8,
       children: [
@@ -202,6 +256,50 @@ class CapturePage extends StatelessWidget {
         cell('48 kHz', '采样率'),
         cell('${recorder.peakDb.toStringAsFixed(0)} dB', '峰值'),
       ],
+    );
+  }
+
+  Widget _detectionCard(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final last = _last;
+    final label =
+        last == null ? '—' : (last.label == 'pending' ? '待分类' : last.label);
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.radar, size: 16, color: scheme.primary),
+                const SizedBox(width: 6),
+                Text('实时检测', style: Theme.of(context).textTheme.labelLarge),
+                const Spacer(),
+                Text('事件 $_events',
+                    style: Theme.of(context).textTheme.titleSmall),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              last == null
+                  ? '等待事件…'
+                  : '$label · ${(last.score * 100).toStringAsFixed(0)}% · '
+                      '推理 ${last.latencyMs} ms',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            if (!_detector.ready)
+              Text(
+                '模型未接入：只统计事件次数，类别显示「待分类」',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: scheme.outline),
+              ),
+          ],
+        ),
+      ),
     );
   }
 }

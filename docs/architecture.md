@@ -74,18 +74,20 @@ SampleSource.frames ──► 环形缓冲（保留最近 N 秒）
 4. 新写 `TfliteClassifier implements Classifier`，把 `ready` 置真
 5. 界面把 `PlaceholderClassifier` 换成它，其余不动
 
-## 现在还没接上的地方（重要）
+## 已经接上的部分
 
-契约写好了，但界面还在用旧的 `RecorderService` 直接录音，尚未改成
-`SampleSource`。迁移顺序建议：
+1. `MicSource implements SampleSource`（`lib/core/impls/mic_source.dart`）——
+   录音、WAV 落盘、帧时间戳都在这里，`RecorderService` 退化成界面控制器
+2. `MicDetector implements Detector`（`lib/core/impls/mic_detector.dart`）——
+   帧 → 能量 → `EnergyGateSegmenter` → `Classifier.classifyWindow` → 投票 → `DetectionResult`
+3. 采集页订阅 `detector.results`，界面显示「事件 N」和最近一次的类别、分数、推理时延
 
-1. 把 `RecorderService` 包一层 `MicSource implements SampleSource`（不改内部逻辑）
-2. 波形页改成订阅 `SampleSource.frames`
-3. 加 `MicDetector implements Detector`，把 `EnergyGateSegmenter` 串上
-4. 最后接 `TfliteClassifier`
+## 还没接上的部分
 
-第 1~2 步只是包一层，风险低；第 3 步才开始有新的行为。
-先做到第 3 步，现场就能演示「说一句话 → 不计数，咳一声 → 计数 +1」。
+- `TfliteClassifier`：分类器仍是 `PlaceholderClassifier`，所以类别显示「待分类」，
+  但**事件计数是真的**（基于能量分割和冷却）
+- BLE 加速度：`SampleSource` 接口已留好，写一个 `BleSource` 即可，界面不用动
+- 双路对齐：等两路都有数据后，按 `deviceTimestampMicros` 合并
 
 ## 命名与目录
 
