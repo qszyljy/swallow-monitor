@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../core/clip_exporter.dart';
 import '../core/recorder_service.dart';
 import 'event_annotation_page.dart';
 
@@ -15,9 +16,47 @@ class RecordingsPage extends StatefulWidget {
 
 class _RecordingsPageState extends State<RecordingsPage> {
   Future<List<File>> _future = RecorderService.listRecordings();
+  bool _exporting = false;
 
   void _reload() {
     setState(() => _future = RecorderService.listRecordings());
+  }
+
+  Future<void> _exportClips() async {
+    setState(() => _exporting = true);
+    try {
+      final result = await ClipExporter.exportAll();
+      if (!mounted) return;
+      if (result.clips == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('没有可导出的片段：先录几条、确认有事件再导出'),
+          ),
+        );
+        return;
+      }
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(result.zipFile.path)],
+          subject: '吞咽事件片段 ${result.clips} 个',
+        ),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '已导出 ${result.clips} 个片段，跳过 ${result.skipped} 条无事件录音',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导出失败：$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   Future<void> _share(File file) async {
@@ -58,6 +97,17 @@ class _RecordingsPageState extends State<RecordingsPage> {
       appBar: AppBar(
         title: const Text('记录'),
         actions: [
+          IconButton(
+            tooltip: '导出事件片段',
+            onPressed: _exporting ? null : _exportClips,
+            icon: _exporting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.save_alt),
+          ),
           IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
         ],
       ),
