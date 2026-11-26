@@ -204,6 +204,17 @@ class _AnalysisViewState extends State<AnalysisView> {
                 minimumSize: const Size.fromHeight(48),
               ),
             ),
+            if (!classifier.ready)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  '模型未接入：分析结果会全部是「待分类」，只有事件数和标注对照有意义。',
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodySmall
+                      ?.copyWith(color: scheme.outline),
+                ),
+              ),
             if (_note != null) ...[
               const SizedBox(height: 8),
               Text(_note!, style: Theme.of(context).textTheme.bodySmall),

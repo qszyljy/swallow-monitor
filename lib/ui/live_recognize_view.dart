@@ -285,6 +285,32 @@ class _LiveRecognizeViewState extends State<LiveRecognizeView> {
     final labels = widget.classifierProvider.classifier.labels;
 
     return [
+      if (!_modelReady) ...[
+        Card(
+          margin: EdgeInsets.zero,
+          color: scheme.errorContainer,
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber, size: 16,
+                    color: scheme.onErrorContainer),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '仅检测模式 · 无分类能力（只能判断有没有事件）',
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: scheme.onErrorContainer),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
       Card(
         margin: EdgeInsets.zero,
         child: Padding(
@@ -297,7 +323,7 @@ class _LiveRecognizeViewState extends State<LiveRecognizeView> {
                   const SizedBox(width: 6),
                   Text('当前判定', style: Theme.of(context).textTheme.labelLarge),
                   const Spacer(),
-                  Text('事件 ${_events.length}',
+                  Text('检测 ${_events.length} 次',
                       style: Theme.of(context).textTheme.titleSmall),
                 ],
               ),
@@ -339,7 +365,9 @@ class _LiveRecognizeViewState extends State<LiveRecognizeView> {
         children: [
           Expanded(
             child: OutlinedButton.icon(
-              onPressed: _last == null ? null : () => _mark(true),
+              onPressed: (_last == null || !_modelReady)
+                  ? null
+                  : () => _mark(true),
               icon: const Icon(Icons.check, size: 18),
               label: Text('判对 $_correct'),
             ),
@@ -347,7 +375,9 @@ class _LiveRecognizeViewState extends State<LiveRecognizeView> {
           const SizedBox(width: 8),
           Expanded(
             child: OutlinedButton.icon(
-              onPressed: _last == null ? null : () => _mark(false),
+              onPressed: (_last == null || !_modelReady)
+                  ? null
+                  : () => _mark(false),
               icon: const Icon(Icons.close, size: 18),
               label: Text('判错 $_wrong'),
             ),
@@ -403,7 +433,8 @@ class _LiveRecognizeViewState extends State<LiveRecognizeView> {
   }
 
   Widget _eventRow(BuildContext context, AppEvent event, ColorScheme scheme) {
-    final low = event.scores.isEmpty ||
+    final low = !_modelReady ||
+        event.scores.isEmpty ||
         event.scores.reduce((a, b) => a > b ? a : b) < _threshold;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -416,9 +447,11 @@ class _LiveRecognizeViewState extends State<LiveRecognizeView> {
           ),
           Expanded(
             child: Text(
-              low
-                  ? '不确定'
-                  : (_names[event.predictedLabel] ?? event.predictedLabel),
+              _modelReady
+                  ? (low
+                      ? '不确定'
+                      : (_names[event.predictedLabel] ?? event.predictedLabel))
+                  : '未分类',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),

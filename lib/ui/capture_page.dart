@@ -342,7 +342,7 @@ class _CapturePageState extends State<CapturePage> {
                 const SizedBox(width: 6),
                 Text('事件检测', style: Theme.of(context).textTheme.labelLarge),
                 const Spacer(),
-                Text('事件 ${_events.length}',
+                Text('检测 ${_events.length} 次',
                     style: Theme.of(context).textTheme.titleSmall),
               ],
             ),
