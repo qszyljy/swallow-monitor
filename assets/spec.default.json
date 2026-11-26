@@ -16,7 +16,11 @@
   "normalize": {
     "mode": "per_window_zscore"
   },
-  "classes": ["swallow", "cough", "interfere"],
+  "classes": [
+    "swallow",
+    "cough",
+    "interfere"
+  ],
   "detection": {
     "energyFrameMs": 25,
     "energyHopMs": 10,
@@ -26,7 +30,8 @@
     "maxEventMs": 1500,
     "cooldownMs": 500,
     "voteWindows": 3,
-    "voteMinHits": 2
+    "voteMinHits": 2,
+    "confidenceThreshold": 0.6
   },
   "sync": {
     "toleranceMs": 10,

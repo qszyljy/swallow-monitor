@@ -6,7 +6,7 @@ import 'core/spec.dart';
 import 'ui/capture_page.dart';
 import 'ui/model_page.dart';
 import 'ui/recordings_page.dart';
-import 'ui/result_page.dart';
+import 'ui/recognize_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -74,7 +74,7 @@ class _HomeShellState extends State<HomeShell> {
             recorder: _recorder,
             classifierProvider: _classifierProvider,
           ),
-          ResultPage(
+          RecognizePage(
             recorder: _recorder,
             classifierProvider: _classifierProvider,
           ),
@@ -87,7 +87,7 @@ class _HomeShellState extends State<HomeShell> {
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
           NavigationDestination(icon: Icon(Icons.graphic_eq), label: '采集'),
-          NavigationDestination(icon: Icon(Icons.insights), label: '分类'),
+          NavigationDestination(icon: Icon(Icons.insights), label: '识别'),
           NavigationDestination(icon: Icon(Icons.folder_open), label: '记录'),
           NavigationDestination(icon: Icon(Icons.model_training), label: '模型'),
         ],

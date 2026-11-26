@@ -100,8 +100,15 @@ class MicDetector implements Detector {
     _busy = true;
     final watch = Stopwatch()..start();
     try {
+      // 以事件中点为中心取窗：训练片段是事件居中的，取尾巴会让两端分布不一致
+      final midMicros = (candidate.startMicros + candidate.endMicros) ~/ 2;
+      final midSample = midMicros * spec.audio.sampleRate ~/ 1000000;
+      final wantedEnd = midSample + need ~/ 2;
+      var ringEnd = _ring.length - (_totalSamples - wantedEnd);
+      ringEnd = ringEnd.clamp(need, _ring.length);
+      final offset = ringEnd - need;
+
       final window = Float32List(need);
-      final offset = _ring.length - need;
       for (var i = 0; i < need; i++) {
         window[i] = _ring[offset + i];
       }

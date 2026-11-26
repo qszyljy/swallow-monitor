@@ -1,10 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../core/app_event.dart';
-import '../core/benchmark_log.dart';
 import '../core/classifier_provider.dart';
 import '../core/contracts/detector.dart';
 import '../core/contracts/sample_source.dart';
@@ -14,8 +12,7 @@ import '../core/spec.dart';
 import 'event_annotation_page.dart';
 import 'waveform_view.dart';
 
-enum CaptureMode { collect, recognize }
-
+/// 采集页：只负责落盘。实时识别在「识别」页，两边互不干扰。
 class CapturePage extends StatefulWidget {
   const CapturePage({
     super.key,
@@ -35,37 +32,31 @@ class _CapturePageState extends State<CapturePage> {
   StreamSubscription<SampleFrame>? _frameSub;
   StreamSubscription<DetectionResult>? _resultSub;
 
+  final List<AppEvent> _events = <AppEvent>[];
   DetectionResult? _last;
-  final List<AppEvent> _eventLog = <AppEvent>[];
-  CaptureMode _mode = CaptureMode.collect;
-  final List<BenchmarkEntry> _benchLog = <BenchmarkEntry>[];
-  int _benchCorrect = 0;
-  int _benchWrong = 0;
 
   RecorderService get recorder => widget.recorder;
-
-  bool get _recognize => _mode == CaptureMode.recognize;
 
   @override
   void initState() {
     super.initState();
-    _detector = _createDetector();
+    _detector = _buildDetector();
     _frameSub = recorder.frames.listen((frame) => _detector.handleFrame(frame));
-    _bindResults();
-    widget.classifierProvider.addListener(_onClassifierChanged);
+    _bind();
+    widget.classifierProvider.addListener(_onModelChanged);
   }
 
-  MicDetector _createDetector() => MicDetector(
+  MicDetector _buildDetector() => MicDetector(
         specProvider: () => PipelineSpec.current,
         classifier: widget.classifierProvider.classifier,
       );
 
-  void _bindResults() {
+  void _bind() {
     _resultSub = _detector.results.listen((result) {
       if (!mounted) return;
       setState(() {
         _last = result;
-        _eventLog.add(
+        _events.add(
           AppEvent(
             startMicros: result.startMicros,
             endMicros: result.timestampMicros,
@@ -78,32 +69,27 @@ class _CapturePageState extends State<CapturePage> {
     });
   }
 
-  /// 模型换了就重建检测器，编号和计数清零，避免新旧模型的分数混在一起。
-  void _onClassifierChanged() {
+  void _onModelChanged() {
     final previous = _detector;
     _resultSub?.cancel();
-    _detector = _createDetector();
-    _bindResults();
+    _detector = _buildDetector();
+    _bind();
     unawaited(previous.dispose());
-    if (mounted) setState(_resetSession);
+    if (mounted) {
+      setState(() {
+        _events.clear();
+        _last = null;
+      });
+    }
   }
 
   @override
   void dispose() {
-    widget.classifierProvider.removeListener(_onClassifierChanged);
+    widget.classifierProvider.removeListener(_onModelChanged);
     _frameSub?.cancel();
     _resultSub?.cancel();
     unawaited(_detector.dispose());
     super.dispose();
-  }
-
-  void _resetSession() {
-    _detector.reset();
-    _eventLog.clear();
-    _benchLog.clear();
-    _benchCorrect = 0;
-    _benchWrong = 0;
-    _last = null;
   }
 
   Future<void> _toggle(BuildContext context) async {
@@ -112,65 +98,23 @@ class _CapturePageState extends State<CapturePage> {
       final seconds = recorder.recordedSeconds;
       final path = recorder.lastFile;
       await recorder.stop();
-      // 只有采集模式落盘，也只有它需要存事件
-      if (!_recognize && path != null && _eventLog.isNotEmpty) {
-        unawaited(EventStore.save(path, _eventLog));
+      if (path != null && _events.isNotEmpty) {
+        unawaited(EventStore.save(path, _events));
       }
-      final name = path?.split('/').last;
+      final name = path?.split('/').last ?? '录音';
       messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            _recognize
-                ? '已停止识别（识别模式不落盘）'
-                : '已保存 ${name ?? '录音'}（${seconds.toStringAsFixed(1)} s）',
-          ),
-        ),
+        SnackBar(content: Text('已保存 $name（${seconds.toStringAsFixed(1)} s）')),
       );
     } else {
-      setState(_resetSession);
-      await recorder.start(saveAudio: !_recognize);
+      _detector.reset();
+      setState(() {
+        _events.clear();
+        _last = null;
+      });
+      await recorder.start(saveAudio: true);
       if (recorder.error != null) {
         messenger.showSnackBar(SnackBar(content: Text(recorder.error!)));
       }
-    }
-  }
-
-  Future<void> _markBenchmark(bool correct) async {
-    final last = _last;
-    if (last == null) return;
-    setState(() {
-      _benchLog.add(
-        BenchmarkEntry(
-          time: DateTime.now(),
-          label: last.label,
-          score: last.score,
-          latencyMs: last.latencyMs,
-          correct: correct,
-        ),
-      );
-      if (correct) {
-        _benchCorrect++;
-      } else {
-        _benchWrong++;
-      }
-    });
-  }
-
-  Future<void> _exportBenchmark() async {
-    if (_benchLog.isEmpty) return;
-    try {
-      final file = await BenchmarkLog.write(_benchLog);
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [XFile(file.path)],
-          subject: '盲测记录 ${_benchLog.length} 条',
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导出失败：$e')),
-      );
     }
   }
 
@@ -185,14 +129,8 @@ class _CapturePageState extends State<CapturePage> {
           appBar: AppBar(
             title: const Text('采集'),
             actions: [
-              if (_recognize)
-                IconButton(
-                  tooltip: '导出盲测记录',
-                  onPressed: _benchLog.isEmpty ? null : _exportBenchmark,
-                  icon: const Icon(Icons.table_chart),
-                ),
               Padding(
-                padding: const EdgeInsets.only(right: 12),
+                padding: const EdgeInsets.only(right: 16),
                 child: Center(
                   child: Row(
                     children: [
@@ -205,9 +143,7 @@ class _CapturePageState extends State<CapturePage> {
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        _recognize
-                            ? (recording ? '识别中' : '识别待机')
-                            : '${recorder.subject} · ${recording ? '录音中' : '待机'}',
+                        '${recorder.subject} · ${recording ? '录音中' : '待机'}',
                       ),
                     ],
                   ),
@@ -221,24 +157,10 @@ class _CapturePageState extends State<CapturePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _modeBar(recording),
-                  const SizedBox(height: 8),
-                  if (!_recognize) ...[
-                    _subjectRow(context, enabled: !recording),
-                    const SizedBox(height: 6),
-                    _labelPicker(enabled: !recording),
-                    const SizedBox(height: 8),
-                  ] else
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: Text(
-                        '识别模式：不落盘，用于演示与盲测',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: scheme.outline),
-                      ),
-                    ),
+                  _subjectRow(context, enabled: !recording),
+                  const SizedBox(height: 6),
+                  _labelPicker(enabled: !recording),
+                  const SizedBox(height: 10),
                   Expanded(
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(16),
@@ -254,34 +176,20 @@ class _CapturePageState extends State<CapturePage> {
                   const SizedBox(height: 10),
                   _metrics(context),
                   const SizedBox(height: 8),
-                  _recognize ? _bigResult(context) : _detectionCard(context),
-                  if (_recognize && _eventLog.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    _benchmarkRow(),
-                  ],
+                  _detectionCard(context),
                   const SizedBox(height: 10),
                   FilledButton.icon(
                     onPressed: () => _toggle(context),
-                    icon: Icon(
-                      recording
-                          ? Icons.stop
-                          : (_recognize ? Icons.bolt : Icons.mic),
-                    ),
-                    label: Text(
-                      recording
-                          ? (_recognize ? '停止识别' : '停止并保存')
-                          : (_recognize ? '开始识别' : '开始录音'),
-                    ),
+                    icon: Icon(recording ? Icons.stop : Icons.mic),
+                    label: Text(recording ? '停止并保存' : '开始录音'),
                     style: FilledButton.styleFrom(
                       minimumSize: const Size.fromHeight(52),
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    _recognize
-                        ? '识别模式只跑推理，不写文件；判对/判错会记进盲测表'
-                        : '48 kHz · 单声道 · 16 bit · 已关闭 AGC / 降噪 / 回声消除\n'
-                            '每个动作前后留 1 s 静息；每类每被试 ≥ 10 条',
+                    '48 kHz · 单声道 · 16 bit · 已关闭 AGC / 降噪 / 回声消除\n'
+                    '每个动作前后留 1 s 静息；每类每被试 ≥ 10 条',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -290,33 +198,6 @@ class _CapturePageState extends State<CapturePage> {
           ),
         );
       },
-    );
-  }
-
-  Widget _modeBar(bool recording) {
-    return SegmentedButton<CaptureMode>(
-      segments: const [
-        ButtonSegment(
-          value: CaptureMode.collect,
-          icon: Icon(Icons.fiber_manual_record, size: 16),
-          label: Text('采集'),
-        ),
-        ButtonSegment(
-          value: CaptureMode.recognize,
-          icon: Icon(Icons.bolt, size: 16),
-          label: Text('识别'),
-        ),
-      ],
-      selected: {_mode},
-      showSelectedIcon: false,
-      onSelectionChanged: recording
-          ? null
-          : (values) {
-              setState(() {
-                _mode = values.first;
-                _resetSession();
-              });
-            },
     );
   }
 
@@ -426,11 +307,10 @@ class _CapturePageState extends State<CapturePage> {
     );
   }
 
-  /// 只标最近 10 秒内的事件——波形窗口就这么长，更早的要看回放标注页。
   List<EventMarker> _markers() {
     final now = recorder.elapsedSeconds;
     final markers = <EventMarker>[];
-    for (final event in _eventLog) {
+    for (final event in _events) {
       final endAgo = now - event.endSec;
       if (endAgo < 0 || endAgo > 10) continue;
       markers.add(
@@ -443,8 +323,12 @@ class _CapturePageState extends State<CapturePage> {
   Widget _detectionCard(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final last = _last;
-    final label =
-        last == null ? '—' : (last.label == 'pending' ? '待分类' : last.label);
+    final threshold = PipelineSpec.current.detection.confidenceThreshold;
+    final label = last == null
+        ? '—'
+        : (!widget.classifierProvider.ready
+            ? '待分类'
+            : (last.score < threshold ? '不确定' : last.label));
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -456,9 +340,9 @@ class _CapturePageState extends State<CapturePage> {
               children: [
                 Icon(Icons.radar, size: 16, color: scheme.primary),
                 const SizedBox(width: 6),
-                Text('实时检测', style: Theme.of(context).textTheme.labelLarge),
+                Text('事件检测', style: Theme.of(context).textTheme.labelLarge),
                 const Spacer(),
-                Text('事件 ${_eventLog.length}',
+                Text('事件 ${_events.length}',
                     style: Theme.of(context).textTheme.titleSmall),
               ],
             ),
@@ -470,9 +354,9 @@ class _CapturePageState extends State<CapturePage> {
                       '推理 ${last.latencyMs} ms',
               style: Theme.of(context).textTheme.bodySmall,
             ),
-            if (!_detector.ready)
+            if (!widget.classifierProvider.ready)
               Text(
-                '模型未接入：只统计事件次数，类别显示「待分类」',
+                '模型未接入：只统计事件次数',
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall
@@ -501,72 +385,6 @@ class _CapturePageState extends State<CapturePage> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _bigResult(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final last = _last;
-    final label = last == null
-        ? '等待事件'
-        : (last.label == 'pending' ? '待分类' : last.label);
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Icon(Icons.bolt, size: 16, color: scheme.primary),
-                const SizedBox(width: 6),
-                Text('实时识别', style: Theme.of(context).textTheme.labelLarge),
-                const Spacer(),
-                Text('事件 ${_eventLog.length}',
-                    style: Theme.of(context).textTheme.titleSmall),
-              ],
-            ),
-            Text(label, style: Theme.of(context).textTheme.displaySmall),
-            Text(
-              last == null
-                  ? '—'
-                  : '${(last.score * 100).toStringAsFixed(0)}% · '
-                      '推理 ${last.latencyMs} ms',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            if (!_detector.ready)
-              Text(
-                '模型未接入，类别显示「待分类」',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: scheme.outline),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _benchmarkRow() {
-    return Row(
-      children: [
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: () => _markBenchmark(true),
-            icon: const Icon(Icons.check, size: 18),
-            label: Text('判对 $_benchCorrect'),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: () => _markBenchmark(false),
-            icon: const Icon(Icons.close, size: 18),
-            label: Text('判错 $_benchWrong'),
-          ),
-        ),
-      ],
     );
   }
 }

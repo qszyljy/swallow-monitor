@@ -25,3 +25,13 @@ Float32List sliceWindowEndingAt(
   }
   return out;
 }
+
+/// 以 [centerSec] 为中心取窗，和训练片段「事件居中」的约定一致。
+Float32List sliceWindowCenteredAt(
+  WavData wav,
+  double centerSec,
+  int windowSamples,
+) {
+  final half = windowSamples / 2 / wav.sampleRate;
+  return sliceWindowEndingAt(wav, centerSec + half, windowSamples);
+}

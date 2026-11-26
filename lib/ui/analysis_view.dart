@@ -31,9 +31,9 @@ class _EventResult {
   }
 }
 
-/// 分类页：模型状态 → 选录音 → 逐事件结果 → 汇总与导出。
-class ResultPage extends StatefulWidget {
-  const ResultPage({
+/// 回放分析：选一条已录录音，对每个事件跑模型，和人工标注对照。
+class AnalysisView extends StatefulWidget {
+  const AnalysisView({
     super.key,
     required this.recorder,
     required this.classifierProvider,
@@ -43,10 +43,10 @@ class ResultPage extends StatefulWidget {
   final ClassifierProvider classifierProvider;
 
   @override
-  State<ResultPage> createState() => _ResultPageState();
+  State<AnalysisView> createState() => _AnalysisViewState();
 }
 
-class _ResultPageState extends State<ResultPage> {
+class _AnalysisViewState extends State<AnalysisView> {
   List<File> _recordings = const <File>[];
   String? _selectedPath;
   List<_EventResult>? _results;
@@ -105,7 +105,9 @@ class _ResultPageState extends State<ResultPage> {
 
       final results = <_EventResult>[];
       for (final event in events) {
-        final window = sliceWindowEndingAt(wav, event.endSec, windowSamples);
+        // 与训练片段一致：以事件中点为中心取窗
+        final center = (event.startSec + event.endSec) / 2;
+        final window = sliceWindowCenteredAt(wav, center, windowSamples);
         final watch = Stopwatch()..start();
         final scores = await classifier.classifyWindow(window);
         watch.stop();
@@ -147,9 +149,7 @@ class _ResultPageState extends State<ResultPage> {
       final stamp = DateTime.now()
           .toIso8601String()
           .replaceAll(':', '')
-          .replaceAll('.', '')
-          .split('T')
-          .join('_');
+          .replaceAll('.', '');
       final file = File('${dir.path}/events_$stamp.csv');
       final buffer = StringBuffer(
         'start_sec,end_sec,predicted,human,match,score,latency_ms\n',
@@ -189,62 +189,53 @@ class _ResultPageState extends State<ResultPage> {
         final classifier = widget.classifierProvider.classifier;
         final results = _results;
 
-        return Scaffold(
-          appBar: AppBar(
-            title: const Text('分类'),
-            actions: [
-              IconButton(
-                tooltip: '刷新录音列表',
-                onPressed: _loadRecordings,
-                icon: const Icon(Icons.refresh),
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _modelCard(context, classifier, scheme),
+            const SizedBox(height: 12),
+            _pickerCard(context),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _busy ? null : _analyze,
+              icon: const Icon(Icons.play_arrow),
+              label: Text(_busy ? '分析中…' : '分析这条录音的全部事件'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
               ),
-              if (results != null && results.isNotEmpty)
-                IconButton(
-                  tooltip: '导出结果',
-                  onPressed: _export,
-                  icon: const Icon(Icons.ios_share),
-                ),
+            ),
+            if (_note != null) ...[
+              const SizedBox(height: 8),
+              Text(_note!, style: Theme.of(context).textTheme.bodySmall),
             ],
-          ),
-          body: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _modelCard(context, classifier, scheme),
-              const SizedBox(height: 12),
-              _pickerCard(context, scheme),
-              const SizedBox(height: 12),
-              FilledButton.icon(
-                onPressed: _busy ? null : _analyze,
-                icon: const Icon(Icons.play_arrow),
-                label: Text(_busy ? '分析中…' : '分析这条录音的全部事件'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(48),
-                ),
+            if (results != null && results.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              _summary(context, results, scheme),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Text('逐事件结果',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: _export,
+                    icon: const Icon(Icons.ios_share, size: 16),
+                    label: const Text('导出'),
+                  ),
+                ],
               ),
-              if (_note != null) ...[
-                const SizedBox(height: 8),
-                Text(_note!, style: Theme.of(context).textTheme.bodySmall),
-              ],
-              if (results != null && results.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                _summary(context, results, scheme),
-                const SizedBox(height: 12),
-                Text('逐事件结果',
-                    style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                for (var i = 0; i < results.length; i++)
-                  _eventTile(context, i, results[i], scheme),
-                const SizedBox(height: 8),
-                Text(
-                  '「一致」只统计已人工标注的事件；没标注的留空，不计入一致率。',
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodySmall
-                      ?.copyWith(color: scheme.outline),
-                ),
-              ],
+              for (var i = 0; i < results.length; i++)
+                _eventTile(context, i, results[i], scheme),
+              const SizedBox(height: 8),
+              Text(
+                '「一致」只统计已人工标注的事件；没标注的留空，不计入一致率。',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: scheme.outline),
+              ),
             ],
-          ),
+          ],
         );
       },
     );
@@ -301,7 +292,7 @@ class _ResultPageState extends State<ResultPage> {
     );
   }
 
-  Widget _pickerCard(BuildContext context, ColorScheme scheme) {
+  Widget _pickerCard(BuildContext context) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
@@ -341,8 +332,7 @@ class _ResultPageState extends State<ResultPage> {
     List<_EventResult> results,
     ColorScheme scheme,
   ) {
-    final labeled =
-        results.where((r) => r.event.humanLabel != null).length;
+    final labeled = results.where((r) => r.event.humanLabel != null).length;
     final matched = results.where((r) => r.match == true).length;
     final meanLatency = results.isEmpty
         ? 0.0
@@ -380,10 +370,7 @@ class _ResultPageState extends State<ResultPage> {
               children: [
                 metric('${results.length}', '事件'),
                 metric('$labeled', '已标注'),
-                metric(
-                  labeled == 0 ? '—' : '$matched/$labeled',
-                  '与标注一致',
-                ),
+                metric(labeled == 0 ? '—' : '$matched/$labeled', '与标注一致'),
                 metric('${meanLatency.toStringAsFixed(0)} ms', '平均推理'),
               ],
             ),

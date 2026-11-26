@@ -26,7 +26,10 @@ class TfliteClassifier implements Classifier {
     required List<String> labels,
     required ModelInputSpec input,
   }) async {
-    final interpreter = tfl.Interpreter.fromFile(File(modelPath));
+    // 4 线程明显快于默认单线程；XNNPACK 由 tflite 内部按需启用
+    final options = tfl.InterpreterOptions()..threads = 4;
+    final interpreter =
+        tfl.Interpreter.fromFile(File(modelPath), options: options);
     interpreter.allocateTensors();
 
     final shape = interpreter.getInputTensor(0).shape;
@@ -42,7 +45,12 @@ class TfliteClassifier implements Classifier {
       throw StateError('labels.txt 是空的');
     }
 
-    return TfliteClassifier._(interpreter, labels, input, modelPath);
+    final classifier = TfliteClassifier._(interpreter, labels, input, modelPath);
+    // 预热两次：第一次推理含算子分配，实测 180 ms 里大半是它
+    final warmup = Float32List(input.windowSamples);
+    await classifier.classifyWindow(warmup);
+    await classifier.classifyWindow(warmup);
+    return classifier;
   }
 
   @override

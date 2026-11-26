@@ -51,6 +51,7 @@ class PipelineSpec {
           cooldownMs: 500,
           voteWindows: 3,
           voteMinHits: 2,
+          confidenceThreshold: 0.6,
         ),
         sync: SyncSpec(toleranceMs: 10, beepAnchor: true, maxDriftPpm: 200),
         latency: LatencySpec(frameReadyBudgetMs: 20, responseBudgetMs: 300),
@@ -124,6 +125,10 @@ class PipelineSpec {
     }
     if (detection.voteMinHits <= 0 || detection.voteMinHits > detection.voteWindows) {
       issues.add('投票命中数必须在 1 到 窗口数 之间');
+    }
+    if (detection.confidenceThreshold <= 0 ||
+        detection.confidenceThreshold > 1) {
+      issues.add('置信度阈值必须在 (0, 1] 之间');
     }
     if (classes.isEmpty) issues.add('类别列表不能为空');
     if (sync.toleranceMs <= 0) issues.add('同步容差必须为正');
@@ -207,6 +212,7 @@ class DetectionSpec {
     required this.cooldownMs,
     required this.voteWindows,
     required this.voteMinHits,
+    required this.confidenceThreshold,
   });
 
   final double energyFrameMs;
@@ -219,6 +225,9 @@ class DetectionSpec {
   final int voteWindows;
   final int voteMinHits;
 
+  /// 最高分低于这个值就显示「不确定」，不许硬给类别。
+  final double confidenceThreshold;
+
   factory DetectionSpec.fromJson(Map<String, dynamic> json) => DetectionSpec(
         energyFrameMs: (json['energyFrameMs'] as num?)?.toDouble() ?? 25,
         energyHopMs: (json['energyHopMs'] as num?)?.toDouble() ?? 10,
@@ -229,6 +238,8 @@ class DetectionSpec {
         cooldownMs: (json['cooldownMs'] as num?)?.toInt() ?? 500,
         voteWindows: (json['voteWindows'] as num?)?.toInt() ?? 3,
         voteMinHits: (json['voteMinHits'] as num?)?.toInt() ?? 2,
+        confidenceThreshold:
+            (json['confidenceThreshold'] as num?)?.toDouble() ?? 0.6,
       );
 
   Map<String, dynamic> toJson() => {
@@ -241,6 +252,7 @@ class DetectionSpec {
         'cooldownMs': cooldownMs,
         'voteWindows': voteWindows,
         'voteMinHits': voteMinHits,
+        'confidenceThreshold': confidenceThreshold,
       };
 }
 
