@@ -15,8 +15,8 @@ import 'waveform_view.dart';
 
 /// 实时识别面板：不落盘，只推理。
 ///
-/// 分割负责「有没有事件」，模型负责「是什么」；最高分低于阈值就显示「不确定」，
-/// 不允许低置信度硬给标签——盲测时会直接判错。
+/// 分割负责「有没有事件」，模型负责「是什么」；最高分低于阈值就显示「不确定」。
+/// 波形支持横向拖动回看，事件按真实时间位置画在曲线上。
 class LiveRecognizeView extends StatefulWidget {
   const LiveRecognizeView({
     super.key,
@@ -51,8 +51,9 @@ class _LiveRecognizeViewState extends State<LiveRecognizeView> {
 
   RecorderService get recorder => widget.recorder;
 
-  double get _threshold =>
-      PipelineSpec.current.detection.confidenceThreshold;
+  double get _threshold => PipelineSpec.current.detection.confidenceThreshold;
+
+  bool get _modelReady => widget.classifierProvider.ready;
 
   @override
   void initState() {
@@ -159,25 +160,46 @@ class _LiveRecognizeViewState extends State<LiveRecognizeView> {
     );
   }
 
+  String _headline() {
+    if (!_modelReady) return '模型未接入';
+    final last = _last;
+    if (last == null) return '等待事件';
+    if (last.score < _threshold) return '不确定';
+    return _names[last.label] ?? last.label;
+  }
+
+  String _subtitle() {
+    if (!_modelReady) return '去「模型」页导入 .zip 后自动生效';
+    final last = _last;
+    if (last == null) return '说句话或咳一声试试';
+    final percent = (last.score * 100).toStringAsFixed(0);
+    final base = '$percent% · 推理 ${last.latencyMs} ms';
+    return last.score < _threshold
+        ? '$base · 低于阈值 ${(_threshold * 100).toStringAsFixed(0)}%'
+        : base;
+  }
+
+  String _waveStatus() {
+    if (recorder.recording) {
+      return '${recorder.elapsedSeconds.toStringAsFixed(1)} s · 48 kHz · '
+          '峰值 ${recorder.peakDb.toStringAsFixed(0)} dB';
+    }
+    if (recorder.peaks.isEmpty) return '未开始';
+    final total = recorder.peaks.length * 0.01;
+    return '已停止 · 共 ${total.toStringAsFixed(1)} s · 左右拖动可回看';
+  }
+
   List<EventMarker> _markers() {
     final now = recorder.elapsedSeconds;
     final markers = <EventMarker>[];
     for (final event in _events) {
       final endAgo = now - event.endSec;
-      if (endAgo < 0 || endAgo > 10) continue;
+      if (endAgo < 0) continue;
       markers.add(
         EventMarker(endAgoSeconds: endAgo, durationSeconds: event.durationSec),
       );
     }
     return markers;
-  }
-
-  String _headline() {
-    if (!widget.classifierProvider.ready) return '待分类';
-    final last = _last;
-    if (last == null) return '等待事件';
-    if (last.score < _threshold) return '不确定';
-    return _names[last.label] ?? last.label;
   }
 
   @override
@@ -186,136 +208,160 @@ class _LiveRecognizeViewState extends State<LiveRecognizeView> {
     return ListenableBuilder(
       listenable: recorder,
       builder: (context, _) {
-        final recording = recorder.recording;
-        final last = _last;
-        final labels = widget.classifierProvider.classifier.labels;
+        final landscape =
+            MediaQuery.of(context).orientation == Orientation.landscape;
+        final wave = _waveBlock(context, scheme);
+        final panel = _panel(context, scheme);
+
+        if (landscape) {
+          // 横屏：波形占左 3/4 高度，信息流在右侧独立滚动，别把曲线挤扁
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                flex: 3,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+                  child: wave,
+                ),
+              ),
+              Expanded(
+                flex: 2,
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(8, 8, 16, 8),
+                  children: panel,
+                ),
+              ),
+            ],
+          );
+        }
 
         return ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-          children: [
-            Text(
-              '实时识别：不落盘，判对/判错会记进盲测表',
-              style: Theme.of(context)
-                  .textTheme
-                  .bodySmall
-                  ?.copyWith(color: scheme.outline),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              height: 150,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(16),
-                child: ColoredBox(
-                  color: scheme.surfaceContainerHighest,
-                  child: WaveformView(
-                    peaks: recorder.peaks,
-                    markers: _markers(),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              recording
-                  ? '${recorder.elapsedSeconds.toStringAsFixed(1)} s · '
-                      '48 kHz · 峰值 ${recorder.peakDb.toStringAsFixed(0)} dB'
-                  : '未开始',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 12),
-            Card(
-              margin: EdgeInsets.zero,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Icon(Icons.bolt, size: 16, color: scheme.primary),
-                        const SizedBox(width: 6),
-                        Text('当前判定',
-                            style: Theme.of(context).textTheme.labelLarge),
-                        const Spacer(),
-                        Text('事件 ${_events.length}',
-                            style: Theme.of(context).textTheme.titleSmall),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Text(_headline(),
-                        style: Theme.of(context).textTheme.displaySmall),
-                    Text(
-                      last == null
-                          ? '—'
-                          : '${(last.score * 100).toStringAsFixed(0)}% · '
-                              '推理 ${last.latencyMs} ms'
-                              '${last.score < _threshold ? ' · 低于阈值 ${(_threshold * 100).toStringAsFixed(0)}%' : ''}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 8),
-                    for (var i = 0; i < labels.length; i++)
-                      _scoreRow(
-                        context,
-                        _names[labels[i]] ?? labels[i],
-                        last == null || i >= last.scores.length
-                            ? 0
-                            : last.scores[i],
-                        scheme,
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            if (_events.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Text('事件流',
-                      style: Theme.of(context).textTheme.labelLarge),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: _exportBench,
-                    child: Text('导出盲测 ${_bench.length}'),
-                  ),
-                ],
-              ),
-              for (var i = _events.length - 1;
-                  i >= 0 && i >= _events.length - 5;
-                  i--)
-                _eventRow(context, _events[i], scheme),
-            ],
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _last == null ? null : () => _mark(true),
-                    icon: const Icon(Icons.check, size: 18),
-                    label: Text('判对 $_correct'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _last == null ? null : () => _mark(false),
-                    icon: const Icon(Icons.close, size: 18),
-                    label: Text('判错 $_wrong'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _toggle,
-              icon: Icon(recording ? Icons.stop : Icons.bolt),
-              label: Text(recording ? '停止识别' : '开始识别'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(52),
-              ),
-            ),
-          ],
+          children: [SizedBox(height: 170, child: wave), ...panel],
         );
       },
     );
+  }
+
+  Widget _waveBlock(BuildContext context, ColorScheme scheme) {
+    final recording = recorder.recording;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: ColoredBox(
+              color: scheme.surfaceContainerHighest,
+              child: WaveformView(
+                peaks: recorder.peaks,
+                markers: _markers(),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                _waveStatus(),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            if (recording)
+              Icon(Icons.fiber_manual_record,
+                  size: 12, color: scheme.error),
+          ],
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _panel(BuildContext context, ColorScheme scheme) {
+    final recording = recorder.recording;
+    final last = _last;
+    final labels = widget.classifierProvider.classifier.labels;
+
+    return [
+      Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.bolt, size: 16, color: scheme.primary),
+                  const SizedBox(width: 6),
+                  Text('当前判定', style: Theme.of(context).textTheme.labelLarge),
+                  const Spacer(),
+                  Text('事件 ${_events.length}',
+                      style: Theme.of(context).textTheme.titleSmall),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(_headline(),
+                  style: Theme.of(context).textTheme.displaySmall),
+              Text(_subtitle(), style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 8),
+              for (var i = 0; i < labels.length; i++)
+                _scoreRow(
+                  context,
+                  _names[labels[i]] ?? labels[i],
+                  last == null || i >= last.scores.length ? 0 : last.scores[i],
+                  scheme,
+                ),
+            ],
+          ),
+        ),
+      ),
+      if (_events.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Text('事件流', style: Theme.of(context).textTheme.labelLarge),
+            const Spacer(),
+            TextButton(
+              onPressed: _exportBench,
+              child: Text('导出盲测 ${_bench.length}'),
+            ),
+          ],
+        ),
+        for (var i = _events.length - 1;
+            i >= 0 && i >= _events.length - 5;
+            i--)
+          _eventRow(context, _events[i], scheme),
+      ],
+      const SizedBox(height: 12),
+      Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _last == null ? null : () => _mark(true),
+              icon: const Icon(Icons.check, size: 18),
+              label: Text('判对 $_correct'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _last == null ? null : () => _mark(false),
+              icon: const Icon(Icons.close, size: 18),
+              label: Text('判错 $_wrong'),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
+      FilledButton.icon(
+        onPressed: _toggle,
+        icon: Icon(recording ? Icons.stop : Icons.bolt),
+        label: Text(recording ? '停止识别' : '开始识别'),
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+      ),
+    ];
   }
 
   Widget _scoreRow(
@@ -370,7 +416,9 @@ class _LiveRecognizeViewState extends State<LiveRecognizeView> {
           ),
           Expanded(
             child: Text(
-              low ? '不确定' : (_names[event.predictedLabel] ?? event.predictedLabel),
+              low
+                  ? '不确定'
+                  : (_names[event.predictedLabel] ?? event.predictedLabel),
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),

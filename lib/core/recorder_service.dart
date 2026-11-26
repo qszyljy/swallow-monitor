@@ -36,12 +36,12 @@ class RecorderService extends ChangeNotifier {
   Timer? _ticker;
   final Stopwatch _clock = Stopwatch();
 
-  /// 波形显示用：每 10 ms 一个峰值点，窗口约 10 s。
+  /// 波形显示用：每 10 ms 一个峰值点，保留 30 s。
   static int get sampleRate => PipelineSpec.current.audio.sampleRate;
   static int get channels => PipelineSpec.current.audio.channels;
 
   int get _binSamples => (PipelineSpec.current.audio.sampleRate / 100).round();
-  static const int _maxPoints = 1000;
+  static const int _maxPoints = 3000; // 30 s，供拖动回看
 
   final List<double> peaks = <double>[];
   int _binFill = 0;
